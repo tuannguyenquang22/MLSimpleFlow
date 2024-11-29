@@ -40,6 +40,14 @@ services:
       - simpleflow_storage
       - simpleflow_redis
 
+  simpleflow_frontend:
+    image: mlsimpleflow-frontend:dev
+    container_name: simpleflow_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - simpleflow_backend
+
 volumes:
   simpleflow_db_data:
   simpleflow_storage_data:
