@@ -34,7 +34,7 @@ def execute_training(
 ):
     from pymongo import MongoClient
 
-    MONGO_CLIENT = MongoClient("mongodb://root:rootpassword@localhost:9510")
+    MONGO_CLIENT = MongoClient("mongodb://root:rootpassword@simpleflow_db:27017")
     SIMPLEFLOW_DATABASE = MONGO_CLIENT["simpleflow"]
 
     try:

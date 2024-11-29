@@ -3,8 +3,8 @@ from celery import Celery
 
 celery_app = Celery(
     "simpleflow_backend",
-    broker='redis://localhost:9530/0',
-    backend='mongodb://root:rootpassword@localhost:9510/',
+    broker='redis://simpleflow_redis:6379/0',
+    backend='mongodb://root:rootpassword@simpleflow_db:27017/',
     include=['worker.tasks'],
 )
 
