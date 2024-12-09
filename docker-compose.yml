@@ -1,0 +1,177 @@
+services:
+  db:
+    image: mongo:latest
+    container_name: db
+    restart: always
+    ports:
+      - "${MONGO_PORT}:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD}
+    volumes:
+      - db_data:/data/db
+      - ./init_mongo.js:/docker-entrypoint-initdb.d/init.js
+    networks:
+      - mlsimpleflow-backend
+  
+  s3:
+    image: minio/minio:latest
+    container_name: s3
+    restart: always
+    ports:
+      - "${MINIO_PORT}:9000"
+      - "${MINIO_CONSOLE_PORT}:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_USERNAME}
+      - MINIO_ROOT_PASSWORD=${MINIO_PASSWORD}
+    volumes:
+      - s3_data:/data
+    command: server --console-address ":9001" /data
+    networks:
+      - mlsimpleflow-backend
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.2
+    container_name: zookeeper
+    restart: always
+    environment:
+      - ZOOKEEPER_CLIENT_PORT=2181
+      - ZOOKEEPER_TICK_TIME=2000
+    networks:
+      - mlsimpleflow-backend
+  
+  kafka:
+    image: confluentinc/cp-kafka:7.3.2
+    container_name: kafka
+    restart: always
+    ports:
+      - "${KAFKA_PORT}:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+    healthcheck:
+      test: nc -vz localhost 9092
+      interval: 10s
+      timeout: 10s
+      retries: 3
+    networks:
+      - mlsimpleflow-backend
+
+  healthcheck:
+    image: mlsimpleflow/health-service:latest-macos
+    container_name: healthcheck
+    environment:
+      - KAFKA_BOOTSTRAP_SERVER=kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - mlsimpleflow-backend
+
+  api_gateway:
+    image: mlsimpleflow/api-gateway:latest-macos
+    container_name: api_gateway
+    restart: always
+    ports:
+      - "${API_GATEWAY_PORT}:8000"
+    environment:
+      - MONGO_DATABASE_URI=mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@db:27017
+      - MONGO_DATABASE=mlsimpleflow_gateway
+      - DATASET_SERVICE_SERVER=dataset_service:8001
+      - TRAINING_SERVICE_SERVER=training_service:8002
+      - ALLOWED_HOSTS=http://localhost:5173
+    depends_on:
+      - db
+      - s3
+      - kafka
+      - healthcheck
+      - dataset_service
+      - training_service
+    networks:
+      - mlsimpleflow-backend
+
+  dataset_service:
+    image: mlsimpleflow/dataset-service:latest-macos
+    container_name: dataset_service
+    restart: always
+    environment:
+      - MONGO_DATABASE_URI=mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@db:27017
+      - MONGO_DATABASE=mlsimpleflow_dataset
+      - MINIO_ENDPOINT=s3:9000
+      - MINIO_ACCESS_KEY=${MINIO_USERNAME}
+      - MINIO_SECRET_KEY=${MINIO_PASSWORD}
+      - BUCKET_NAME=mlsimpleflow-datasets
+    depends_on:
+      - db
+      - healthcheck
+      - s3
+    networks:
+      - mlsimpleflow-backend
+    
+  training_service:
+    image: mlsimpleflow/model-training-service:latest-macos
+    container_name: training_service
+    restart: always
+    environment:
+      - KAFKA_BOOTSTRAP_SERVER=kafka:9092
+      - SCHEDULE_TOPIC=schedule-topic
+      - MONGO_DATABASE_URI=mongodb://${MONGO_USERNAME}:${MONGO_PASSWORD}@db:27017
+      - MONGO_DATABASE=mlsimpleflow_model
+    depends_on:
+      - db
+      - healthcheck
+      - kafka
+    networks:
+      - mlsimpleflow-backend
+
+  schedule_service:
+    image: mlsimpleflow/scheduler-service:latest-macos
+    container_name: schedule_service
+    restart: always
+    environment:
+      - KAFKA_BOOTSTRAP_SERVER=kafka:9092
+      - SCHEDULE_TOPIC=schedule-topic
+      - EXECUTE_TOPIC=execute-topic
+    depends_on:
+      - kafka
+      - healthcheck
+    networks:
+      - mlsimpleflow-backend
+
+  executor_service:
+    image: mlsimpleflow/executor-service:latest-macos
+    container_name: executor_service
+    restart: always
+    environment:
+      - KAFKA_BOOTSTRAP_SERVER=kafka:9092
+      - EXECUTE_TOPIC=execute-topic
+      - MINIO_ENDPOINT=s3:9000
+      - MINIO_ACCESS_KEY=${MINIO_USERNAME}
+      - MINIO_SECRET_KEY=${MINIO_PASSWORD}
+      - MODEL_BUCKET=mlsimpleflow-models
+      - DATASET_BUCKET=mlsimpleflow-datasets
+      - DATASET_SERVICE_SERVER=dataset_service:8001
+      - TRAINING_SERVICE_SERVER=training_service:8002
+    depends_on:
+      - kafka
+      - s3
+      - dataset_service
+      - training_service
+      - healthcheck
+    networks:
+      - mlsimpleflow-backend
+
+
+volumes:
+  db_data:
+  s3_data:
+
+networks:
+  mlsimpleflow-backend:
+    driver: bridge

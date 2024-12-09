@@ -1,0 +1,1 @@
+docker build -t mlsimpleflow/dataset-service:latest-macos .
