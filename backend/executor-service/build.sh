@@ -1,1 +1,0 @@
-docker build -t mlsimpleflow/executor-service:latest-macos .
